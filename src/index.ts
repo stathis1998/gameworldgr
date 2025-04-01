@@ -276,9 +276,10 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
 
   // Regex to find the category id and forum thread id in the URL
   // Ex. forum/59/163262
+  // Keep only the last match
 
-  const urlRegex = /forum\/(\d+)\/(\d+)/;
-  const urlMatch = nextPost.fulltext.match(urlRegex);
+  const urlRegex = /forum\/(\d+)\/(\d+)/g;
+  const urlMatch: any = Array.from(nextPost.fulltext.matchAll(urlRegex)).pop();
 
   let categoryId = "";
   let threadId = "";
