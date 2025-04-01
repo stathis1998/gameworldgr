@@ -14,12 +14,12 @@ const UPDATE_REGEX = /\[UPDATE(?:\s*\d*)?(?::\s*(.+?))?\]/gi;
 
 async function main() {
   if (!process.env.USER_ID) {
-    console.error("USER_ID is not set in the environment variables.");
+    logger.error("USER_ID is not set in the environment variables.");
     return;
   }
 
   if (!process.env.USER_NAME) {
-    console.error("USER_NAME is not set in the environment variables.");
+    logger.error("USER_NAME is not set in the environment variables.");
     return;
   }
 
@@ -174,7 +174,7 @@ async function insertMessage(
     );
   } catch (err) {
     await connection.rollback();
-    console.error("❌ Transaction failed, rolled back:", err);
+    logger.error("❌ Transaction failed, rolled back:", err);
   }
 }
 
@@ -211,7 +211,7 @@ async function getImage(connection: Connection, listingId: number) {
 const MAX_RECURSION = 10;
 async function processPost(connection: Connection, title?: string, depth = 0) {
   if (depth > MAX_RECURSION) {
-    console.log("Max recursion depth reached. Exiting.");
+    logger.info("Max recursion depth reached. Exiting.");
     return;
   }
 
@@ -219,14 +219,14 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
   if (!title) {
     lastPostedTitle = await getLastPostedTitle(connection);
     if (!lastPostedTitle) {
-      console.log("No last posted was title found.");
+      logger.info("No last posted was title found.");
       return;
     }
   }
 
   const nextPost = await getNextPost(connection, lastPostedTitle!);
   if (!nextPost) {
-    console.log("No next post found.");
+    logger.info("No next post found.");
     return;
   }
 
@@ -287,7 +287,7 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
     categoryId = urlMatch[1];
     threadId = urlMatch[2];
   } else {
-    console.log("Skipping post, no URL found.");
+    logger.info("Skipping post, no URL found.");
     await processPost(connection, nextPost.title, depth + 1);
     return;
   }
@@ -299,7 +299,7 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
   );
 
   if (!subjectAndParent) {
-    console.log("No subject and parent found.");
+    logger.info("No subject and parent found.");
     return;
   }
 
