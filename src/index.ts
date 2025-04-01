@@ -208,7 +208,7 @@ async function getImage(connection: Connection, listingId: number) {
   return `https://gameworld.gr/media/reviews/photos/${imageObj.rel_path}${imageObj.filename}.${imageObj.file_extension}`;
 }
 
-const MAX_RECURSION = 50;
+const MAX_RECURSION = 10;
 async function processPost(connection: Connection, title?: string, depth = 0) {
   if (depth > MAX_RECURSION) {
     console.log("Max recursion depth reached. Exiting.");
