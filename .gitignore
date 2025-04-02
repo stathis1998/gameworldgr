@@ -9,3 +9,5 @@
 
 # Logs
 **/*.log
+
+last_created.txt

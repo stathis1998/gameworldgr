@@ -9,6 +9,11 @@ import { Connection, ResultSetHeader } from "mysql2/promise";
 import * as cheerio from "cheerio";
 import { Element } from "domhandler";
 import { logger } from "./logger";
+import {
+  formatDate,
+  getLastProcessedDate,
+  setLastProcessedDate,
+} from "./utils";
 
 const UPDATE_REGEX = /\[UPDATE(?:\s*\d*)?(?::\s*(.+?))?\]/gi;
 
@@ -24,57 +29,33 @@ async function main() {
   }
 
   const connection = await connectToDatabase();
-  if (!connection) return;
+  if (!connection) {
+    logger.error("Failed to connect to the database.");
+    return;
+  }
 
-  await processPost(connection);
+  const lastCreated = await getLastProcessedDate();
+  if (!lastCreated) {
+    logger.info("No last created date found. Exiting.");
+    return;
+  }
+
+  await processPost(connection, lastCreated);
 
   await disconnectFromDatabase(connection);
 }
 
 main();
 
-async function getLastPostedTitle(
-  connection: Connection
-): Promise<string | undefined> {
-  const res = await queryDatabase(
-    connection,
-    "SELECT jos_kunena_messages_text.message FROM jos_kunena_messages INNER JOIN jos_kunena_messages_text ON jos_kunena_messages.id = jos_kunena_messages_text.mesid WHERE userid = ? AND jos_kunena_messages_text.message LIKE '%[center][b]%' ORDER BY time DESC LIMIT 10",
-    [Number(process.env.USER_ID)]
-  );
-
-  if (!res || res.length === 0) return;
-
-  for (const row of res) {
-    const extractedCommentTitle = row.message
-      .match(/\[b\](.*)\[\/b\]/)?.[1]
-      .trim();
-
-    if (extractedCommentTitle) {
-      const res2 = await queryDatabase(
-        connection,
-        "SELECT title FROM jos_content WHERE `title` = ? OR `fulltext` LIKE ? ORDER BY created DESC LIMIT 1",
-        [`${extractedCommentTitle}`, `%${extractedCommentTitle}%`]
-      );
-
-      if (!res2 || res2.length === 0) continue;
-
-      return res2[0].title;
-    }
-  }
-}
-
-async function getNextPost(connection: Connection, title: string) {
+async function getNextPost(connection: Connection, created: string) {
   const res = await queryDatabase(
     connection,
     `SELECT * FROM jos_content
-   WHERE created > (
-     SELECT created FROM jos_content WHERE title = ? ORDER BY created DESC LIMIT 1
-   )
-   AND created >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+   WHERE created > ?
    AND \`fulltext\` LIKE ?
    ORDER BY created ASC
    LIMIT 1`,
-    [title, "%forum topic%"]
+    [created, "%forum topic%"]
   );
 
   if (!res || res.length === 0) return;
@@ -92,6 +73,7 @@ async function insertMessage(
     message: string;
     userId: number;
     name: string;
+    created: string;
   }
 ) {
   const timestamp = Math.floor(Date.now() / 1000);
@@ -169,6 +151,8 @@ async function insertMessage(
     // All good — commit
     await connection.commit();
 
+    await setLastProcessedDate(data.created);
+
     logger.info(
       `✅ Inserted message ID ${messageId} and updated user/topic/category in transaction`
     );
@@ -209,25 +193,22 @@ async function getImage(connection: Connection, listingId: number) {
 }
 
 const MAX_RECURSION = 10;
-async function processPost(connection: Connection, title?: string, depth = 0) {
+async function processPost(connection: Connection, created: string, depth = 0) {
+  if (depth % 100 === 0) {
+    logger.info(`Recursion depth: ${depth}`);
+  }
+
   if (depth > MAX_RECURSION) {
     logger.info("Max recursion depth reached. Exiting.");
     return;
   }
 
-  let lastPostedTitle = title;
-  if (!title) {
-    lastPostedTitle = await getLastPostedTitle(connection);
-    if (!lastPostedTitle) {
-      logger.info("No last posted was title found.");
-      return;
-    }
-  }
-
-  const nextPost = await getNextPost(connection, lastPostedTitle!);
+  const nextPost = await getNextPost(connection, created);
   if (!nextPost) {
     logger.info("No next post found.");
     return;
+  } else {
+    console.log(nextPost.id, "Created:", nextPost.created, nextPost.title);
   }
 
   const HTML2BBCode = require("../node_modules/html2bbcode").HTML2BBCode;
@@ -289,7 +270,7 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
     threadId = urlMatch[2];
   } else {
     logger.info("Skipping post, no URL found.");
-    await processPost(connection, nextPost.title, depth + 1);
+    await processPost(connection, formatDate(nextPost.created), depth + 1);
     return;
   }
 
@@ -300,13 +281,14 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
   );
 
   if (!subjectAndParent) {
-    logger.info("No subject and parent found.");
+    logger.info("Skipping post, no subject and parent found.");
+    await processPost(connection, formatDate(nextPost.created), depth + 1);
     return;
   }
 
   let foundForumTopic = false;
   const finalTitle =
-    strippedTitle.split("").reverse().join("") || nextPost.title;
+    strippedTitle.split("").reverse().join("") || nextPost.title.trim();
   const finalUpdates = updateElements
     .map((el) => {
       return $.html(el)
@@ -341,6 +323,13 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
 
   const finalPost = `[center][b]${finalTitle}[/b][/center]\n\n[img]${imageURL}[/img]\n\n${bbcode}`;
 
+  const hasPosted = await hasBeenPosted(connection, finalPost);
+  if (hasPosted) {
+    logger.info("Already posted, skipping.");
+    await processPost(connection, formatDate(nextPost.created), depth + 1);
+    return;
+  }
+
   await insertMessage(connection, {
     parentId: subjectAndParent?.parentId,
     threadId: Number(threadId),
@@ -349,10 +338,23 @@ async function processPost(connection: Connection, title?: string, depth = 0) {
     message: finalPost,
     userId: Number(process.env.USER_ID!),
     name: process.env.USER_NAME!,
+    created: nextPost.created,
   });
 
   const postUrl = `https://gameworld.gr/forum/${categoryId}/${threadId}`;
   logger.info(`Posted at: ${postUrl}`);
+}
+
+async function hasBeenPosted(connection: Connection, message: string) {
+  const res = await queryDatabase(
+    connection,
+    `SELECT jos_kunena_messages_text.* FROM jos_kunena_messages_text INNER JOIN jos_kunena_messages ON jos_kunena_messages.id = jos_kunena_messages_text.mesid WHERE jos_kunena_messages.userid = ? AND jos_kunena_messages_text.message = ? LIMIT 1`,
+    [Number(process.env.USER_ID!), message]
+  );
+
+  if (!res || res.length === 0) return false;
+
+  return true;
 }
 
 function unrollElements(element: Element, $: cheerio.CheerioAPI): Element[] {

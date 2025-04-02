@@ -14,6 +14,8 @@
   "description": "Automation script for gamewolrd.gr to post replies on threads based on new posts",
   "dependencies": {
     "cheerio": "^1.0.0",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "dotenv": "^16.4.7",
     "html2bbcode": "^1.2.6",
     "mysql2": "^3.13.0",
