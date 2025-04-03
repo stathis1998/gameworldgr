@@ -74,6 +74,7 @@ async function insertMessage(
     userId: number;
     name: string;
     created: string;
+    imageURL: string;
   }
 ) {
   const timestamp = Math.floor(Date.now() / 1000);
@@ -148,6 +149,76 @@ async function insertMessage(
     if (!res5 || res5.affectedRows === 0)
       throw new Error("Category metadata update failed");
 
+    // Update community activity
+
+    // Build activity title HTML
+    const activityTitle = `{single}{actor}{/single}{multiple}{actors}{/multiple} replied to the topic '<a href="/forum/${data.categoryId}/${data.threadId}">${data.subject}</a>' in the forum.`;
+
+    // Optional: extract plain-text from message (strip BBCode for preview)
+    const strippedMessage = data.message.replace(/\[.*?\]/g, "").trim();
+    const previewText = strippedMessage.substring(0, 300); // Limit for readability
+
+    // Optional image + "Read More" link
+    const readMoreUrl = `/forum/${data.categoryId}/${data.threadId}/${messageId}`;
+    const imageTag = `<a href="${data.imageURL}" rel="nofollow" target="_blank">${data.imageURL}</a><br><br>`;
+
+    // Build content block
+    const activityContent = `
+      <div class="bbcode_center" style="text-align:center;">
+        <b>${data.subject}</b>
+      </div>
+      <br>
+      ${imageTag}
+      ${previewText}
+      <br>
+      <br>
+      <a rel="nofollow" href="${readMoreUrl}" class="small profile-newsfeed-item-action">Read More...</a>
+    `.trim();
+
+    const res6 = (await queryDatabase(
+      connection,
+      `INSERT INTO jos_community_activities
+   (actor, target, title, content, app, verb, cid, created, access, points, archived, comment_id, comment_type, like_id, like_type, updated_at, params, location, latitude, longitude, actors)
+   VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?, ?)`,
+      [
+        data.userId,
+        0,
+        activityTitle,
+        activityContent,
+        "kunena.thread.reply", // app
+        "kunena.thread.reply", // verb
+        data.threadId, // cid
+        timestamp,
+        0, // access
+        1, // points — seems to always be 1
+        0, // archived
+        data.threadId, // comment_id
+        "kunena.thread.reply", // comment_type
+        0, // like_id (update after insertion to this entry id)
+        "kunena.thread.reply", // like_type
+        timestamp,
+        "", // params
+        "", // location
+        255, // latitude
+        255, // longitude
+        "", // actors
+      ]
+    )) as unknown as ResultSetHeader;
+
+    if (!res6 || res6.affectedRows === 0)
+      throw new Error("Community activity insert failed");
+
+    // Update the like_id in the activity entry
+    const activityId = res6.insertId;
+    const res7 = (await queryDatabase(
+      connection,
+      `UPDATE jos_community_activities SET like_id = ? WHERE id = ?`,
+      [activityId, activityId]
+    )) as unknown as ResultSetHeader;
+
+    if (!res7 || res7.affectedRows === 0)
+      throw new Error("Community activity like_id update failed");
+
     // All good — commit
     await connection.commit();
 
@@ -192,7 +263,7 @@ async function getImage(connection: Connection, listingId: number) {
   return `https://gameworld.gr/media/reviews/photos/${imageObj.rel_path}${imageObj.filename}.${imageObj.file_extension}`;
 }
 
-const MAX_RECURSION = 10;
+const MAX_RECURSION = 100;
 async function processPost(connection: Connection, created: string, depth = 0) {
   if (depth % 100 === 0) {
     logger.info(`Recursion depth: ${depth}`);
@@ -312,6 +383,11 @@ async function processPost(connection: Connection, created: string, depth = 0) {
     });
 
   const imageURL = await getImage(connection, nextPost.id);
+  if (!imageURL) {
+    logger.info("No image found, skipping post.");
+    await processPost(connection, formatDate(nextPost.created), depth + 1);
+    return;
+  }
 
   const bbcode = finalUpdates
     .map((el) => converter.feed(el).toString())
@@ -339,6 +415,7 @@ async function processPost(connection: Connection, created: string, depth = 0) {
     userId: Number(process.env.USER_ID!),
     name: process.env.USER_NAME!,
     created: nextPost.created,
+    imageURL: imageURL,
   });
 
   const postUrl = `https://gameworld.gr/forum/${categoryId}/${threadId}`;
