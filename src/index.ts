@@ -45,7 +45,9 @@ async function main() {
   await disconnectFromDatabase(connection);
 }
 
-main();
+main().catch((err) => {
+  logger.error("An unexpected error occurred:", err);
+});
 
 async function getNextPost(connection: Connection, created: string) {
   const res = await queryDatabase(
@@ -55,7 +57,7 @@ async function getNextPost(connection: Connection, created: string) {
    AND \`fulltext\` LIKE ?
    ORDER BY created ASC
    LIMIT 1`,
-    [created, "%forum topic%"]
+    [created, "%forum topic%"],
   );
 
   if (!res || res.length === 0) return;
@@ -75,7 +77,7 @@ async function insertMessage(
     name: string;
     created: string;
     imageURL: string;
-  }
+  },
 ) {
   const timestamp = Math.floor(Date.now() / 1000);
 
@@ -97,7 +99,7 @@ async function insertMessage(
         data.name,
         timestamp,
         "162.158.210.219",
-      ]
+      ],
     )) as unknown as ResultSetHeader;
 
     if (!res || res.affectedRows === 0)
@@ -109,7 +111,7 @@ async function insertMessage(
     const res2 = (await queryDatabase(
       connection,
       `INSERT INTO jos_kunena_messages_text (mesid, message) VALUES (?, ?)`,
-      [messageId, data.message]
+      [messageId, data.message],
     )) as unknown as ResultSetHeader;
 
     if (!res2 || res2.affectedRows === 0)
@@ -119,7 +121,7 @@ async function insertMessage(
     const res3 = (await queryDatabase(
       connection,
       `UPDATE jos_kunena_users SET posts = posts + 1 WHERE userid = ?`,
-      [data.userId]
+      [data.userId],
     )) as unknown as ResultSetHeader;
 
     if (!res3 || res3.affectedRows === 0)
@@ -131,7 +133,7 @@ async function insertMessage(
       `UPDATE jos_kunena_topics
        SET last_post_id = ?, last_post_time = ?, last_post_userid = ?, last_post_guest_name = ?
        WHERE id = ?`,
-      [messageId, timestamp, data.userId, data.name, data.threadId]
+      [messageId, timestamp, data.userId, data.name, data.threadId],
     )) as unknown as ResultSetHeader;
 
     if (!res4 || res4.affectedRows === 0)
@@ -143,7 +145,7 @@ async function insertMessage(
       `UPDATE jos_kunena_categories
       SET last_post_id = ?, last_post_time = ?
       WHERE id = ?`,
-      [messageId, timestamp, data.categoryId]
+      [messageId, timestamp, data.categoryId],
     )) as unknown as ResultSetHeader;
 
     if (!res5 || res5.affectedRows === 0)
@@ -202,7 +204,7 @@ async function insertMessage(
         255, // latitude
         255, // longitude
         "", // actors
-      ]
+      ],
     )) as unknown as ResultSetHeader;
 
     if (!res6 || res6.affectedRows === 0)
@@ -213,7 +215,7 @@ async function insertMessage(
     const res7 = (await queryDatabase(
       connection,
       `UPDATE jos_community_activities SET like_id = ? WHERE id = ?`,
-      [activityId, activityId]
+      [activityId, activityId],
     )) as unknown as ResultSetHeader;
 
     if (!res7 || res7.affectedRows === 0)
@@ -225,7 +227,7 @@ async function insertMessage(
     await setLastProcessedDate(data.created);
 
     logger.info(
-      `✅ Inserted message ID ${messageId} and updated user/topic/category in transaction`
+      `✅ Inserted message ID ${messageId} and updated user/topic/category in transaction`,
     );
   } catch (err) {
     await connection.rollback();
@@ -236,12 +238,12 @@ async function insertMessage(
 async function getSubjectAndParent(
   connection: Connection,
   categoryId: string,
-  threadId: string
+  threadId: string,
 ) {
   const res = await queryDatabase(
     connection,
     "SELECT subject, first_post_id FROM jos_kunena_topics WHERE category_id = ? AND id = ? LIMIT 1",
-    [categoryId, threadId]
+    [categoryId, threadId],
   );
 
   if (!res || res.length === 0) return;
@@ -253,7 +255,7 @@ async function getImage(connection: Connection, listingId: number) {
   const res = await queryDatabase(
     connection,
     "SELECT * FROM jos_jreviews_media WHERE listing_id = ? AND main_media = 1 LIMIT 1",
-    [listingId]
+    [listingId],
   );
 
   if (!res || res.length === 0) return;
@@ -279,7 +281,7 @@ async function processPost(connection: Connection, created: string, depth = 0) {
     logger.info("No next post found.");
     return;
   } else {
-    console.log(nextPost.id, "Created:", nextPost.created, nextPost.title);
+    logger.info(nextPost.id, "Created:", nextPost.created, nextPost.title);
   }
 
   const HTML2BBCode = require("../node_modules/html2bbcode").HTML2BBCode;
@@ -304,8 +306,8 @@ async function processPost(connection: Connection, created: string, depth = 0) {
   } else {
     updateElements.push(
       ...unrolledElements.slice(
-        unrolledElements.length - updateIndexReverse - 1
-      )
+        unrolledElements.length - updateIndexReverse - 1,
+      ),
     );
   }
 
@@ -348,7 +350,7 @@ async function processPost(connection: Connection, created: string, depth = 0) {
   const subjectAndParent = await getSubjectAndParent(
     connection,
     categoryId,
-    threadId
+    threadId,
   );
 
   if (!subjectAndParent) {
@@ -426,7 +428,7 @@ async function hasBeenPosted(connection: Connection, message: string) {
   const res = await queryDatabase(
     connection,
     `SELECT jos_kunena_messages_text.* FROM jos_kunena_messages_text INNER JOIN jos_kunena_messages ON jos_kunena_messages.id = jos_kunena_messages_text.mesid WHERE jos_kunena_messages.userid = ? AND jos_kunena_messages_text.message = ? LIMIT 1`,
-    [Number(process.env.USER_ID!), message]
+    [Number(process.env.USER_ID!), message],
   );
 
   if (!res || res.length === 0) return false;

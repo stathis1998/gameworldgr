@@ -12,16 +12,24 @@ export const logger = winston.createLogger({
         msg += ` ${JSON.stringify(metadata)}`;
       }
       return msg;
-    })
+    }),
   ),
   transports: [
     new winston.transports.Console(),
     new winston.transports.File({
-      filename: path.join(process.env.LOG_PATH ?? "logs", "script.log"),
+      filename: path.join(
+        process.env.LOG_PATH ?? __dirname,
+        "logs",
+        "script.log",
+      ),
       level: "info",
     }),
     new winston.transports.File({
-      filename: path.join(process.env.LOG_PATH ?? "logs", "error.log"),
+      filename: path.join(
+        process.env.LOG_PATH ?? __dirname,
+        "logs",
+        "error.log",
+      ),
       level: "error",
     }),
   ],
